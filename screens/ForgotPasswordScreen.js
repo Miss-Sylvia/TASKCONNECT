@@ -1,82 +1,71 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
-import axios from 'axios';
+// POST /api/auth/forgot-password { identifier }   (email OR phone)
+// No SMS. Reuse OTP table. Always create a code; email if possible; log in dev.
+exports.forgotPassword = async (req, res) => {
+  const { identifier } = req.body;
+  if (!identifier) return res.status(400).json({ message: 'identifier is required (email or phone)' });
 
-export default function ForgotPasswordScreen({ navigation }) {
-  const [emailOrPhone, setEmailOrPhone] = useState('');
+  try {
+    const pool = await poolPromise;
+    const idTrim = String(identifier).trim();
+    const isPhone = isPhoneLike(idTrim);
 
-  const handleSendResetLink = async () => {
-    if (!emailOrPhone) {
-      alert('Please enter your email or phone number');
-      return;
+    // Build an OTP key that we’ll use consistently in all 3 steps
+    // - For phones: use E.164 form (2335…) as the key
+    // - For emails: use lowercase email as the key
+    let otpKey = idTrim.toLowerCase();
+    let emailTo = null;
+
+    if (isPhone) {
+      const { local, e164 } = normalizeGhana(idTrim);
+      otpKey = e164;
+
+      // Try to fetch the user by *either* saved format
+      const ures = await pool.request()
+        .input('p1', sql.VarChar, local)
+        .input('p2', sql.VarChar, e164)
+        .query('SELECT TOP 1 id, email, phone FROM Users WHERE phone IN (@p1, @p2)');
+      const user = ures.recordset[0];
+      if (user?.email) emailTo = user.email;
+    } else {
+      const ures = await pool.request()
+        .input('email', sql.VarChar, idTrim.toLowerCase())
+        .query('SELECT TOP 1 id, email, phone FROM Users WHERE LOWER(email) = @email');
+      const user = ures.recordset[0];
+      if (user) {
+        emailTo = user.email; // confirm email exists on file
+      }
     }
-    try {
-      const response = await axios.post('http://YOUR_BACKEND_IP:5000/api/auth/forgot-password', {
-        emailOrPhone,
-      });
-      alert(response.data.message);
-      // optionally navigate to Login or elsewhere
-    } catch (error) {
-      alert(error.response?.data?.message || 'Something went wrong');
+
+    // Create OTP and store against the otpKey in the otps table
+    const code = genCode();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await pool.request()
+      .input('phone', sql.VarChar, otpKey)      // we reuse the 'phone' column as the key
+      .input('otp', sql.VarChar, code)
+      .input('expiresAt', sql.DateTime, expiresAt)
+      .query('INSERT INTO otps (phone, otp, expires_at) VALUES (@phone, @otp, @expiresAt)');
+
+    // Deliver via EMAIL (if configured & we have an address). Otherwise just log for dev.
+    if (emailTo) {
+      try {
+        await sendEmail(
+          emailTo,
+          'Your TaskConnect password reset code',
+          `Use this code to reset your password: ${code}. It expires in 10 minutes.`
+        );
+      } catch (e) {
+        console.warn('Email send failed:', e.message);
+        console.log(`[FORGOT:DEV] To:${emailTo} | Code:${code}`);
+      }
+    } else {
+      console.log(`[FORGOT:DEV] No email on file for ${idTrim}. Code: ${code}`);
     }
-  };
 
-  return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Reset Password</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Enter Email or Phone Number"
-        value={emailOrPhone}
-        onChangeText={setEmailOrPhone}
-        keyboardType="email-address"
-      />
-      <TouchableOpacity style={styles.button} onPress={handleSendResetLink}>
-        <Text style={styles.buttonText}>Send Reset Link</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.goBack()}>
-        <Text style={styles.backText}>Back to Login</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    padding: 20,
-    backgroundColor: '#fff',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  input: {
-    borderWidth: 1,
-    padding: 12,
-    marginBottom: 15,
-    borderRadius: 5,
-    borderColor: 'gray',
-    fontSize: 16,
-  },
-  button: {
-    backgroundColor: '#007BFF', // Blue color
-    padding: 15,
-    borderRadius: 5,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  backText: {
-    textAlign: 'center',
-    marginTop: 15,
-    color: '#007BFF',
-    fontWeight: 'bold',
-  },
-});
+    // Always generic (no user enumeration)
+    return res.status(200).json({ message: 'If the account exists, a reset code has been sent.' });
+  } catch (err) {
+    console.error('forgotPassword error:', err.message);
+    return res.status(200).json({ message: 'If the account exists, a reset code has been sent.' });
+  }
+};

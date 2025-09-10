@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // ✅ Add this if you haven't already
 
 export default function LoginScreen({ navigation }) {
   const [emailOrPhone, setEmailOrPhone] = useState('');
@@ -14,7 +15,7 @@ export default function LoginScreen({ navigation }) {
     }
 
     try {
-      const response = await axios.post('http://192.168.36.131:5000/api/auth/login', {
+      const response = await axios.post('http://192.168.59.131:5000/api/auth/login', {
         email: emailOrPhone,
         password,
       });
@@ -22,12 +23,17 @@ export default function LoginScreen({ navigation }) {
       const user = response.data.user;
       console.log('Login response:', user);
 
+      // ✅ Save user info for later (optional but useful)
+      await AsyncStorage.setItem('user', JSON.stringify(user));
+
+      // ✅ Redirect based on role
       if (!user.role) {
-        navigation.replace('RoleSelection', { userId: user.id }); // optional: pass userId
+        // No role assigned yet — go to RoleSelection screen
+        navigation.replace('RoleSelection', { userId: user.id });
       } else if (user.role === 'Client') {
         navigation.reset({
           index: 0,
-          routes: [{ name: 'ClientTabs' }],
+          routes: [{ name: 'WelcomeClient' }],
         });
       } else if (user.role === 'Tasker') {
         navigation.reset({

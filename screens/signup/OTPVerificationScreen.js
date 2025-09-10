@@ -26,7 +26,7 @@ export default function OTPVerificationScreen({ route, navigation }) {
   const [loading, setLoading] = useState(false);
   const [autoSubmitDone, setAutoSubmitDone] = useState(false);
 
-  const baseURL = 'http://192.168.36.131:5000/api'; // Adjust if your backend IP changes
+  const baseURL = 'http://192.168.59.131:5000/api'; // Adjust if your backend IP changes
 
   useEffect(() => {
     if (otp.length === 6 && !autoSubmitDone) {

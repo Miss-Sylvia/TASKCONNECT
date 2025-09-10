@@ -26,7 +26,7 @@ export default function UserInfoScreen({ navigation }) {
     { label: 'Tasker', value: 'Tasker' },
   ]);
 
-  const baseURL = 'http://192.168.36.131:5000/api';
+  const baseURL = 'http://192.168.59.131:5000/api';
 
   const handleContinue = async () => {
     if (!firstName || !surname || !email || !phoneNumber || !password || !role) {
